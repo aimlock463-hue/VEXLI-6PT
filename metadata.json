@@ -1,0 +1,5 @@
+{
+  "name": "Velix AI",
+  "description": "A premium AI mobile web application with chat, voice, image generation, and data analysis capabilities.",
+  "requestFramePermissions": ["microphone"]
+}
