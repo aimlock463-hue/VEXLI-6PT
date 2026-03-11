@@ -16,16 +16,28 @@ import {
   Maximize2,
   Volume2,
   VolumeX,
-  Loader2
+  Loader2,
+  Crown,
+  LogOut,
+  ShieldAlert,
+  Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { geminiService } from './services/geminiService';
-import { cn, Message, ChatHistory } from './utils';
+import { cn, Message, LIMITS } from './utils';
+import { useAuth } from './context/AuthContext';
+import { AuthModal } from './components/AuthModal';
+import { Ad } from './components/Ads';
+import { AdminPanel } from './components/AdminPanel';
 
 export default function App() {
+  const { user, usage, logout, upgrade, incrementUsage, checkLimit } = useAuth();
   const [view, setView] = useState<'home' | 'chat' | 'image' | 'news' | 'analysis'>('home');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [showInterstitial, setShowInterstitial] = useState(false);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -62,6 +74,10 @@ export default function App() {
     }
   }, [messages]);
 
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   const downloadImage = () => {
     if (!generatedImage) return;
     const link = document.createElement('a');
@@ -76,6 +92,16 @@ export default function App() {
 
   const handleSend = async (text: string = input) => {
     if (!text.trim()) return;
+    
+    if (!user) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    if (!checkLimit('chats')) {
+      setShowInterstitial(true);
+      return;
+    }
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -88,6 +114,7 @@ export default function App() {
     setInput('');
     setView('chat');
     setIsStreaming(true);
+    incrementUsage('chats');
 
     try {
       const stream = await geminiService.generateChatResponse([...messages, userMsg]);
@@ -128,6 +155,10 @@ export default function App() {
   };
 
   const startVoiceInput = () => {
+    if (!user) {
+      setIsAuthModalOpen(true);
+      return;
+    }
     if (!('webkitSpeechRecognition' in window)) {
       alert('Speech recognition is not supported in this browser.');
       return;
@@ -171,9 +202,18 @@ export default function App() {
   };
 
   const generateImage = async () => {
+    if (!user) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    if (!checkLimit('images')) {
+      setShowInterstitial(true);
+      return;
+    }
     if (!input.trim()) return;
     setIsGeneratingImage(true);
     setView('image');
+    incrementUsage('images');
     try {
       const url = await geminiService.generateImage(input);
       setGeneratedImage(url);
@@ -185,6 +225,14 @@ export default function App() {
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!user) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    if (!checkLimit('analysis')) {
+      setShowInterstitial(true);
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -193,6 +241,7 @@ export default function App() {
       const content = event.target?.result as string;
       setIsAnalyzing(true);
       setView('analysis');
+      incrementUsage('analysis');
       try {
         const result = await geminiService.analyzeData(content);
         setAnalysisResult(result || "No analysis generated.");
@@ -244,6 +293,29 @@ export default function App() {
                 </button>
               </div>
 
+              {user && (
+                <div className="mb-8 p-4 glass-card bg-gradient-to-br from-brand-primary/10 to-transparent border-brand-primary/20">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-full bg-brand-primary/20 flex items-center justify-center text-brand-primary font-bold">
+                      {user.name[0]}
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold">{user.name}</div>
+                      <div className="text-[10px] text-white/40 uppercase tracking-widest">{user.plan} PLAN</div>
+                    </div>
+                  </div>
+                  {user.plan === 'free' && (
+                    <button 
+                      onClick={upgrade}
+                      className="w-full py-3 rounded-xl bg-gradient-to-r from-brand-primary to-brand-secondary text-black text-xs font-black flex items-center justify-center gap-2 shadow-lg shadow-brand-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
+                    >
+                      <Crown className="w-4 h-4" />
+                      GO PREMIUM
+                    </button>
+                  )}
+                </div>
+              )}
+
               <button 
                 onClick={() => { setView('home'); setMessages([]); setIsSidebarOpen(false); }}
                 className="flex items-center gap-3 w-full p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors mb-4"
@@ -264,11 +336,40 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="mt-auto pt-6 border-t border-white/10">
+              <div className="mt-auto pt-6 border-t border-white/10 space-y-2">
+                <div className="px-3 py-2 text-[10px] text-white/20 uppercase tracking-widest text-center mb-2">
+                  Made with ❤️ by Ali
+                </div>
+                {user?.isAdmin && (
+                  <button 
+                    onClick={() => { setIsAdminPanelOpen(true); setIsSidebarOpen(false); }}
+                    className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-white/5 transition-colors text-sm text-brand-primary font-semibold"
+                  >
+                    <ShieldAlert className="w-5 h-5" />
+                    <span>Admin Panel</span>
+                  </button>
+                )}
                 <button className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-white/5 transition-colors text-sm text-white/70">
                   <Settings className="w-5 h-5" />
                   <span>Settings</span>
                 </button>
+                {user ? (
+                  <button 
+                    onClick={logout}
+                    className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-white/5 transition-colors text-sm text-red-400"
+                  >
+                    <LogOut className="w-5 h-5" />
+                    <span>Logout</span>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => { setIsAuthModalOpen(true); setIsSidebarOpen(false); }}
+                    className="flex items-center gap-3 w-full p-3 rounded-xl bg-brand-primary text-black font-bold"
+                  >
+                    <Plus className="w-5 h-5" />
+                    <span>Sign In</span>
+                  </button>
+                )}
               </div>
             </motion.div>
           </>
@@ -286,11 +387,23 @@ export default function App() {
             <div className="w-2 h-2 rounded-full bg-brand-primary animate-pulse" />
             <span className="font-semibold text-sm tracking-wide">VELIX AI</span>
           </div>
-          <div className="w-6 h-6" /> {/* Spacer */}
+          <div className="flex items-center gap-3">
+            {user?.plan === 'premium' && <Crown className="w-5 h-5 text-brand-primary" />}
+            {!user && (
+              <button 
+                onClick={() => setIsAuthModalOpen(true)}
+                className="text-xs font-bold text-brand-primary"
+              >
+                SIGN IN
+              </button>
+            )}
+          </div>
         </header>
 
         {/* View Content */}
         <main className="flex-1 overflow-y-auto no-scrollbar pb-32">
+          {user?.plan === 'free' && <Ad type="banner" />}
+          
           <AnimatePresence mode="wait">
             {view === 'home' && (
               <motion.div
@@ -314,12 +427,20 @@ export default function App() {
                   How can I help you <br />
                   <span className="bg-gradient-to-r from-brand-primary to-brand-secondary bg-clip-text text-transparent">today?</span>
                 </h1>
-                <p className="text-white/50 max-w-xs mb-12 text-sm">
-                  Experience the next generation of AI assistance with Velix.
+                
+                <p className="text-[10px] text-white/20 uppercase tracking-[0.3em] mb-8 animate-pulse">
+                  Designed & Developed by Ali
                 </p>
 
+                {user && user.plan === 'free' && (
+                  <div className="mb-8 px-4 py-2 rounded-full bg-white/5 border border-white/10 text-[10px] text-white/40 uppercase tracking-widest">
+                    {usage.chats} / {LIMITS.free.chats} Daily Chats Used
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-4 w-full max-w-md">
-                  <button onClick={() => setView('image')} className="glass-card p-4 flex flex-col items-center gap-3 hover:bg-white/10 transition-all group">
+                  <button onClick={() => setView('image')} className="glass-card p-4 flex flex-col items-center gap-3 hover:bg-white/10 transition-all group relative">
+                    {user?.plan === 'free' && usage.images >= LIMITS.free.images && <Lock className="absolute top-2 right-2 w-3 h-3 text-white/20" />}
                     <ImageIcon className="w-6 h-6 text-brand-primary group-hover:scale-110 transition-transform" />
                     <span className="text-xs font-medium">Create Image</span>
                   </button>
@@ -331,7 +452,8 @@ export default function App() {
                     <Lightbulb className="w-6 h-6 text-yellow-400 group-hover:scale-110 transition-transform" />
                     <span className="text-xs font-medium">Get Advice</span>
                   </button>
-                  <label className="glass-card p-4 flex flex-col items-center gap-3 hover:bg-white/10 transition-all group cursor-pointer">
+                  <label className="glass-card p-4 flex flex-col items-center gap-3 hover:bg-white/10 transition-all group cursor-pointer relative">
+                    {user?.plan === 'free' && usage.analysis >= LIMITS.free.analysis && <Lock className="absolute top-2 right-2 w-3 h-3 text-white/20" />}
                     <BarChart3 className="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform" />
                     <span className="text-xs font-medium">Analyze Data</span>
                     <input type="file" className="hidden" onChange={handleFileUpload} accept=".csv,.txt" />
@@ -352,40 +474,42 @@ export default function App() {
                     Start a conversation...
                   </div>
                 )}
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={cn(
-                      "flex flex-col max-w-[85%]",
-                      msg.role === 'user' ? "ml-auto items-end" : "mr-auto items-start"
-                    )}
-                  >
+                {messages.map((msg, i) => (
+                  <React.Fragment key={msg.id}>
                     <div
                       className={cn(
-                        "px-4 py-3 rounded-2xl text-sm",
-                        msg.role === 'user' 
-                          ? "bg-brand-primary/20 border border-brand-primary/30 text-white" 
-                          : "bg-white/5 border border-white/10 text-white/90"
+                        "flex flex-col max-w-[85%]",
+                        msg.role === 'user' ? "ml-auto items-end" : "mr-auto items-start"
                       )}
                     >
-                      <div className="markdown-body">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      <div
+                        className={cn(
+                          "px-4 py-3 rounded-2xl text-sm",
+                          msg.role === 'user' 
+                            ? "bg-brand-primary/20 border border-brand-primary/30 text-white" 
+                            : "bg-white/5 border border-white/10 text-white/90"
+                        )}
+                      >
+                        <div className="markdown-body">
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 mt-2 px-1">
+                        <span className="text-[10px] text-white/30">
+                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        {msg.role === 'model' && msg.content && (
+                          <button 
+                            onClick={() => handleTTS(msg.content)}
+                            className="text-white/30 hover:text-brand-primary transition-colors"
+                          >
+                            {isSpeaking ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 mt-2 px-1">
-                      <span className="text-[10px] text-white/30">
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                      {msg.role === 'model' && msg.content && (
-                        <button 
-                          onClick={() => handleTTS(msg.content)}
-                          className="text-white/30 hover:text-brand-primary transition-colors"
-                        >
-                          {isSpeaking ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                    {user?.plan === 'free' && i > 0 && i % 4 === 0 && <Ad type="banner" />}
+                  </React.Fragment>
                 ))}
                 <div ref={chatEndRef} />
               </motion.div>
@@ -408,6 +532,11 @@ export default function App() {
                   ) : generatedImage ? (
                     <>
                       <img src={generatedImage} alt="Generated" className="w-full h-full object-cover" />
+                      {user?.plan === 'free' && (
+                        <div className="absolute top-4 left-4 px-2 py-1 bg-black/60 backdrop-blur-md rounded text-[8px] font-bold text-white/40 uppercase tracking-widest">
+                          Velix AI Free Watermark
+                        </div>
+                      )}
                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
                         <button 
                           onClick={downloadImage}
@@ -461,17 +590,20 @@ export default function App() {
                 className="p-6 space-y-6"
               >
                 <h2 className="text-xl font-bold mb-2">Latest AI News</h2>
-                {news.map((item) => (
-                  <div key={item.id} className="glass-card overflow-hidden group">
-                    <img src={item.image} alt={item.title} className="w-full h-40 object-cover group-hover:scale-105 transition-transform duration-500" />
-                    <div className="p-4">
-                      <h3 className="font-bold mb-2">{item.title}</h3>
-                      <p className="text-sm text-white/60 line-clamp-2">{item.desc}</p>
-                      <button className="mt-4 text-xs font-bold text-brand-primary flex items-center gap-1">
-                        Read More <Plus className="w-3 h-3" />
-                      </button>
+                {news.map((item, i) => (
+                  <React.Fragment key={item.id}>
+                    <div className="glass-card overflow-hidden group">
+                      <img src={item.image} alt={item.title} className="w-full h-40 object-cover group-hover:scale-105 transition-transform duration-500" />
+                      <div className="p-4">
+                        <h3 className="font-bold mb-2">{item.title}</h3>
+                        <p className="text-sm text-white/60 line-clamp-2">{item.desc}</p>
+                        <button className="mt-4 text-xs font-bold text-brand-primary flex items-center gap-1">
+                          Read More <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                    {user?.plan === 'free' && i === 0 && <Ad type="banner" />}
+                  </React.Fragment>
                 ))}
               </motion.div>
             )}
@@ -569,6 +701,10 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
+      {isAdminPanelOpen && <AdminPanel onClose={() => setIsAdminPanelOpen(false)} />}
+      {showInterstitial && <Ad type="interstitial" onClose={() => setShowInterstitial(false)} />}
 
       <audio ref={audioRef} onEnded={() => setIsSpeaking(false)} className="hidden" />
     </div>
