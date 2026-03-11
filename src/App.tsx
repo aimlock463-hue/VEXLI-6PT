@@ -32,7 +32,7 @@ import { Ad } from './components/Ads';
 import { AdminPanel } from './components/AdminPanel';
 
 export default function App() {
-  const { user, usage, logout, upgrade, incrementUsage, checkLimit } = useAuth();
+  const { user, firebaseUser, usage, loading, logout, upgrade, incrementUsage, checkLimit } = useAuth();
   const [view, setView] = useState<'home' | 'chat' | 'image' | 'news' | 'analysis'>('home');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -49,6 +49,9 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [news, setNews] = useState<any[]>([]);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [isFullscreenImage, setIsFullscreenImage] = useState(false);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isPaying, setIsPaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -78,6 +81,15 @@ export default function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  if (loading) {
+    return (
+      <div className="h-screen w-full bg-[#050505] flex flex-col items-center justify-center gap-4">
+        <div className="w-12 h-12 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+        <p className="text-white/50 text-sm animate-pulse uppercase tracking-widest">Initializing Velix AI...</p>
+      </div>
+    );
+  }
+
   const downloadImage = () => {
     if (!generatedImage) return;
     const link = document.createElement('a');
@@ -88,12 +100,15 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  const [isFullscreenImage, setIsFullscreenImage] = useState(false);
-
   const handleSend = async (text: string = input) => {
     if (!text.trim()) return;
     
     if (!user) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    if (firebaseUser && !firebaseUser.emailVerified) {
       setIsAuthModalOpen(true);
       return;
     }
@@ -206,6 +221,10 @@ export default function App() {
       setIsAuthModalOpen(true);
       return;
     }
+    if (firebaseUser && !firebaseUser.emailVerified) {
+      setIsAuthModalOpen(true);
+      return;
+    }
     if (!checkLimit('images')) {
       setShowInterstitial(true);
       return;
@@ -226,6 +245,10 @@ export default function App() {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!user) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    if (firebaseUser && !firebaseUser.emailVerified) {
       setIsAuthModalOpen(true);
       return;
     }
@@ -262,6 +285,15 @@ export default function App() {
       { id: 2, title: "The Future of Robotics", desc: "How AI is transforming physical automation in the workplace.", image: "https://picsum.photos/seed/robot/400/200" },
       { id: 3, title: "AI in Healthcare", desc: "New breakthroughs in diagnostic accuracy using deep learning models.", image: "https://picsum.photos/seed/health/400/200" },
     ]);
+  };
+
+  const handleUpgrade = async () => {
+    setIsPaying(true);
+    // Simulate Stripe payment
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await upgrade();
+    setIsPaying(false);
+    setIsPaymentModalOpen(false);
   };
 
   return (
@@ -306,7 +338,7 @@ export default function App() {
                   </div>
                   {user.plan === 'free' && (
                     <button 
-                      onClick={upgrade}
+                      onClick={() => setIsPaymentModalOpen(true)}
                       className="w-full py-3 rounded-xl bg-gradient-to-r from-brand-primary to-brand-secondary text-black text-xs font-black flex items-center justify-center gap-2 shadow-lg shadow-brand-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
                     >
                       <Crown className="w-4 h-4" />
@@ -705,6 +737,68 @@ export default function App() {
       <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
       {isAdminPanelOpen && <AdminPanel onClose={() => setIsAdminPanelOpen(false)} />}
       {showInterstitial && <Ad type="interstitial" onClose={() => setShowInterstitial(false)} />}
+
+      <AnimatePresence>
+        {isPaymentModalOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsPaymentModalOpen(false)}
+              className="absolute inset-0 bg-black/90 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="glass-card w-full max-w-md p-8 relative z-10 text-center"
+            >
+              <button onClick={() => setIsPaymentModalOpen(false)} className="absolute top-6 right-6 text-white/30">
+                <X className="w-6 h-6" />
+              </button>
+
+              <div className="w-16 h-16 bg-brand-primary/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Crown className="w-8 h-8 text-brand-primary" />
+              </div>
+              
+              <h2 className="text-2xl font-bold mb-2">Upgrade to Premium</h2>
+              <p className="text-white/50 text-sm mb-8">
+                Unlock unlimited AI chats, high-res image generation, and advanced data analysis for just <span className="text-white font-bold">$9.99/month</span>.
+              </p>
+
+              <div className="space-y-4">
+                <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-left space-y-3">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-white/50">Plan</span>
+                    <span className="font-bold">Premium Monthly</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-white/50">Price</span>
+                    <span className="font-bold">$9.99</span>
+                  </div>
+                  <div className="h-px bg-white/10" />
+                  <div className="flex justify-between font-bold">
+                    <span>Total</span>
+                    <span className="text-brand-primary">$9.99</span>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={handleUpgrade}
+                  disabled={isPaying}
+                  className="w-full py-4 rounded-xl bg-brand-primary text-black font-bold flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
+                >
+                  {isPaying ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Pay with Stripe'}
+                </button>
+                
+                <p className="text-[10px] text-white/20 uppercase tracking-widest">
+                  Secure payment powered by Stripe
+                </p>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <audio ref={audioRef} onEnded={() => setIsSpeaking(false)} className="hidden" />
     </div>

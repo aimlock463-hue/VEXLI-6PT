@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { X, Mail, Lock, User as UserIcon, Loader2, Github } from 'lucide-react';
+import { X, Mail, Lock, User as UserIcon, Loader2, Github, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface AuthModalProps {
@@ -16,37 +16,106 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const [adminKey, setAdminKey] = useState('');
   const [showAdminKey, setShowAdminKey] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { login, signup } = useAuth();
+  const [error, setError] = useState<string | null>(null);
+  const { login, signup, loginWithGoogle, firebaseUser, user, resendVerification } = useAuth();
 
   const SECRET_ADMIN_KEY = "ALI_VELIX_2026"; // Our secret key
+
+  // Automatically close modal when user is logged in and verified
+  useEffect(() => {
+    if (firebaseUser && firebaseUser.emailVerified && user) {
+      onClose();
+    }
+  }, [firebaseUser, user, onClose]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
     try {
       if (isLogin) {
         await login(email, password);
       } else {
         await signup(email, name, password);
-        
-        // If they provided the correct secret key, grant admin
-        if (adminKey === SECRET_ADMIN_KEY) {
-          const user = JSON.parse(localStorage.getItem('velix_user') || '{}');
-          user.isAdmin = true;
-          user.plan = 'premium'; // Admins get premium too
-          localStorage.setItem('velix_user', JSON.stringify(user));
-          window.location.reload();
-        }
       }
-      onClose();
-    } catch (error) {
-      console.error(error);
+      // Modal will close via useEffect once firebaseUser and user profile are ready
+    } catch (err: any) {
+      console.error(err);
+      // Make Firebase errors more readable
+      let msg = err.message || 'An error occurred';
+      if (msg.includes('auth/user-not-found')) msg = 'No account found with this email. Please sign up.';
+      if (msg.includes('auth/wrong-password')) msg = 'Incorrect password. Please try again.';
+      if (msg.includes('auth/email-already-in-use')) msg = 'This email is already registered. Please sign in.';
+      if (msg.includes('auth/invalid-credential')) msg = 'Invalid email or password.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
   };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await loginWithGoogle();
+      onClose();
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Google sign-in failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (firebaseUser && !firebaseUser.emailVerified) {
+    return (
+      <div className="fixed inset-0 z-[150] flex items-center justify-center p-6">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+          className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+        />
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          className="glass-card w-full max-w-md p-8 relative z-10 text-center"
+        >
+          <button onClick={onClose} className="absolute top-6 right-6 text-white/30">
+            <X className="w-6 h-6" />
+          </button>
+
+          <div className="w-16 h-16 bg-brand-primary/20 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Mail className="w-8 h-8 text-brand-primary" />
+          </div>
+          
+          <h2 className="text-2xl font-bold mb-2">Verify Your Email</h2>
+          <p className="text-white/50 text-sm mb-8">
+            We've sent a verification code to <span className="text-white font-medium">{firebaseUser.email}</span>. 
+            Please check your inbox and click the link to activate your account.
+          </p>
+
+          <div className="space-y-4">
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full py-4 rounded-xl bg-brand-primary text-black font-bold flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95 transition-all"
+            >
+              I've Verified My Email
+            </button>
+            <button 
+              onClick={resendVerification}
+              className="w-full py-4 rounded-xl bg-white/5 border border-white/10 text-white font-bold hover:bg-white/10 transition-colors"
+            >
+              Resend Verification Email
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-6">
@@ -72,6 +141,13 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
         <p className="text-white/50 text-sm mb-8">
           {isLogin ? 'Sign in to continue your AI journey' : 'Join Velix AI and unlock the future'}
         </p>
+
+        {error && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400 text-sm">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isLogin && (
@@ -152,14 +228,14 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
           <div className="h-px flex-1 bg-white/10" />
         </div>
 
-        <div className="mt-6 grid grid-cols-2 gap-4">
-          <button className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
-            <Github className="w-5 h-5" />
-            <span className="text-sm">GitHub</span>
-          </button>
-          <button className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
+        <div className="mt-6">
+          <button 
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors disabled:opacity-50"
+          >
             <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center text-[10px] text-black font-bold">G</div>
-            <span className="text-sm">Google</span>
+            <span className="text-sm">Continue with Google</span>
           </button>
         </div>
 
